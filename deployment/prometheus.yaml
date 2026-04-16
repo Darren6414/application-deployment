@@ -9,8 +9,10 @@ data:
     scrape_configs:
       - job_name: 'obesity-api'
         static_configs:
-          - targets: ['obesity-service:80']
+          - targets: ['obesity-api-test.lab.sspcloud.fr']
         metrics_path: '/metrics'
+        scheme: https
+
 ---
 apiVersion: apps/v1
 kind: Deployment
