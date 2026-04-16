@@ -1,0 +1,181 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: http://prometheus-service:9090
+        isDefault: true
+        access: proxy
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: default
+        folder: Obesity API
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-json
+data:
+  obesity-api.json: |
+    {
+      "title": "Obesity API — Monitoring",
+      "uid": "obesity-api",
+      "timezone": "browser",
+      "refresh": "15s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Requêtes par minute",
+          "type": "timeseries",
+          "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+          "targets": [{
+            "expr": "rate(http_requests_total[1m])",
+            "legendFormat": "{{handler}} {{status}}"
+          }]
+        },
+        {
+          "id": 2,
+          "title": "Latence moyenne (ms)",
+          "type": "timeseries",
+          "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+          "targets": [{
+            "expr": "rate(http_request_duration_seconds_sum[1m]) / rate(http_request_duration_seconds_count[1m]) * 1000",
+            "legendFormat": "{{handler}}"
+          }]
+        },
+        {
+          "id": 3,
+          "title": "Taux d'erreurs 5xx",
+          "type": "timeseries",
+          "gridPos": {"x": 0, "y": 8, "w": 12, "h": 8},
+          "targets": [{
+            "expr": "rate(http_requests_total{status=\"5xx\"}[1m])",
+            "legendFormat": "{{handler}}"
+          }]
+        },
+        {
+          "id": 4,
+          "title": "Mémoire utilisée (MB)",
+          "type": "timeseries",
+          "gridPos": {"x": 12, "y": 8, "w": 12, "h": 8},
+          "targets": [{
+            "expr": "process_resident_memory_bytes / 1024 / 1024",
+            "legendFormat": "Mémoire RSS"
+          }]
+        },
+        {
+          "id": 5,
+          "title": "Total requêtes /predict",
+          "type": "stat",
+          "gridPos": {"x": 0, "y": 16, "w": 6, "h": 4},
+          "targets": [{
+            "expr": "http_requests_total{handler=\"/predict\"}",
+            "legendFormat": "Prédictions"
+          }]
+        },
+        {
+          "id": 6,
+          "title": "Total requêtes /health",
+          "type": "stat",
+          "gridPos": {"x": 6, "y": 16, "w": 6, "h": 4},
+          "targets": [{
+            "expr": "http_requests_total{handler=\"/health\"}",
+            "legendFormat": "Health checks"
+          }]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: grafana/grafana:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: "admin"
+        - name: GF_AUTH_ANONYMOUS_ENABLED
+          value: "true"
+        - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+          value: "Viewer"
+        volumeMounts:
+        - name: datasources
+          mountPath: /etc/grafana/provisioning/datasources
+        - name: dashboard-provider
+          mountPath: /etc/grafana/provisioning/dashboards
+        - name: dashboard-json
+          mountPath: /var/lib/grafana/dashboards
+      volumes:
+      - name: datasources
+        configMap:
+          name: grafana-datasources
+      - name: dashboard-provider
+        configMap:
+          name: grafana-dashboard-provider
+      - name: dashboard-json
+        configMap:
+          name: grafana-dashboard-json
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-service
+spec:
+  selector:
+    app: grafana
+  ports:
+  - port: 3000
+    targetPort: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: grafana-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+spec:
+  ingressClassName: onyxia
+  tls:
+  - hosts:
+    - user-edq-grafana.user.lab.sspcloud.fr
+  rules:
+  - host: user-edq-grafana.user.lab.sspcloud.fr
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana-service
+            port:
+              number: 3000
